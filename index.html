@@ -2,91 +2,96 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ASTAF - Python in Browser</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ASTAF - Python Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="h-screen flex flex-col overflow-hidden bg-[#0b1120] text-slate-200">
+<body class="h-[100dvh] flex flex-col overflow-hidden bg-[#0b1120] text-slate-200">
 
     <!-- شاشة التحميل -->
     <div id="loader">
-        <h1 class="text-3xl font-bold text-blue-500 mb-4">ASTAF</h1>
-        <div class="spinner mb-4"></div>
-        <p class="text-gray-400 text-sm">جاري تحميل بيئة Python...</p>
+        <div class="spinner mb-3"></div>
+        <p class="text-blue-400 text-sm font-mono animate-pulse">Booting Python...</p>
     </div>
 
-    <!-- شريط التنقل العلوي -->
-    <header class="glass-panel px-3 py-2 flex justify-between items-center shrink-0">
+    <!-- شريط التنقل العلوي (مضغوط) -->
+    <header class="bg-[#1e293b] px-2 py-1.5 flex justify-between items-center border-b border-slate-700 shrink-0">
         <div class="flex items-center gap-2">
-            <button onclick="toggleSidebar()" class="md:hidden text-gray-300 hover:text-white px-2"><i class="fa-solid fa-bars text-lg"></i></button>
-            <i class="fa-brands fa-python text-blue-500 text-xl"></i>
-            <h1 class="text-lg font-bold">ASTAF <span class="text-blue-500">V3</span></h1>
+            <i class="fa-brands fa-python text-blue-500 text-lg"></i>
+            <span class="text-sm font-bold">ASTAF <span class="text-xs text-gray-400">V4</span></span>
         </div>
-        <div class="flex items-center gap-2 text-xs">
-            <span id="py-status" class="flex items-center gap-1 text-yellow-400 bg-slate-800 px-2 py-1 rounded">
-                <i class="fa-solid fa-circle text-[8px]"></i> تحميل...
-            </span>
-            <span id="wake-status" class="hidden items-center gap-1 text-green-400 bg-slate-800 px-2 py-1 rounded">
-                <i class="fa-solid fa-eye text-[10px]"></i> شاشة نشطة
-            </span>
+        <div class="flex items-center gap-1">
+            <button onclick="toggleFiles()" class="text-xs bg-slate-700 px-2 py-1 rounded md:hidden"><i class="fa-solid fa-folder"></i> الملفات</button>
+            <span id="py-status" class="flex items-center gap-1 text-[10px] text-yellow-400 bg-slate-800 px-2 py-1 rounded"><i class="fa-solid fa-circle text-[6px]"></i> تحميل</span>
         </div>
     </header>
 
+    <!-- المنطقة الرئيسية (تقسيم ذكي) -->
     <div class="flex-1 flex overflow-hidden relative">
-        <!-- القائمة الجانبية (الملفات) -->
-        <aside id="sidebar" class="absolute md:relative z-20 w-64 h-full glass-panel flex flex-col shrink-0 transition-transform transform -translate-x-full md:translate-x-0 border-l border-slate-700">
-            <div class="p-3 border-b border-slate-700">
-                <h2 class="text-xs font-bold text-gray-400 mb-2">مدير الملفات</h2>
+        
+        <!-- قائمة الملفات (تظهر كطبقة في الموبايل، وجانبية في الشاشات الكبيرة) -->
+        <aside id="files-panel" class="absolute md:relative z-30 w-64 h-full bg-[#1e293b] border-l border-slate-700 flex flex-col transition-transform transform translate-x-full md:translate-x-0 right-0 shadow-2xl md:shadow-none">
+            <div class="p-2 flex justify-between items-center border-b border-slate-700">
+                <h2 class="text-xs font-bold text-gray-400">الملفات</h2>
                 <div class="flex gap-1">
-                    <button onclick="createNewFile()" class="flex-1 bg-slate-700 hover:bg-slate-600 py-1 rounded text-xs"><i class="fa-solid fa-plus"></i> جديد</button>
-                    <button onclick="document.getElementById('file-upload').click()" class="flex-1 bg-slate-700 hover:bg-slate-600 py-1 rounded text-xs"><i class="fa-solid fa-upload"></i> رفع</button>
-                    <input type="file" id="file-upload" class="hidden" accept=".py,.txt,.json" onchange="uploadFile(this)">
+                    <button onclick="createNewFile()" class="text-[10px] bg-blue-600 px-2 py-1 rounded"><i class="fa-solid fa-plus"></i></button>
+                    <button onclick="document.getElementById('file-upload').click()" class="text-[10px] bg-green-600 px-2 py-1 rounded"><i class="fa-solid fa-upload"></i></button>
+                    <button onclick="toggleFiles()" class="md:hidden text-[10px] bg-red-600 px-2 py-1 rounded"><i class="fa-solid fa-xmark"></i></button>
                 </div>
+                <input type="file" id="file-upload" class="hidden" accept=".py" onchange="uploadFile(this)">
             </div>
-            <ul id="file-list" class="flex-1 overflow-y-auto p-2 space-y-1 text-sm">
-                <!-- الملفات -->
-            </ul>
+            <ul id="file-list" class="flex-1 overflow-y-auto p-1 text-xs space-y-1"></ul>
         </aside>
 
-        <!-- الطبقة المظلمة للموبايل -->
-        <div id="overlay" class="fixed inset-0 bg-black/50 z-10 hidden md:hidden" onclick="toggleSidebar()"></div>
-
-        <!-- المنطقة الرئيسية -->
-        <main class="flex-1 flex flex-col lg:flex-row overflow-hidden">
-            <!-- المحرر -->
-            <div class="flex-1 flex flex-col min-w-0 border-l border-slate-700 h-[60vh] lg:h-auto">
-                <div class="glass-panel px-2 py-1 flex justify-between items-center border-b border-slate-700 shrink-0">
-                    <div class="flex items-center gap-1">
-                        <span id="current-file-name" class="text-xs font-mono text-gray-300 font-bold ml-1">main.py</span>
-                        <button onclick="saveCurrentFile()" class="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded"><i class="fa-solid fa-save"></i> حفظ</button>
-                    </div>
-                    <div class="flex items-center gap-1">
-                        <button onclick="runCode()" id="btn-run" class="text-xs bg-green-600 hover:bg-green-500 px-3 py-1 rounded font-bold"><i class="fa-solid fa-play"></i> تشغيل</button>
-                        <button onclick="stopCode()" id="btn-stop" class="text-xs bg-red-600 hover:bg-red-500 px-3 py-1 rounded font-bold hidden"><i class="fa-solid fa-stop"></i> إيقاف</button>
+        <!-- المحرر والطرفية -->
+        <main class="flex-1 flex flex-col md:flex-row overflow-hidden min-w-0">
+            
+            <!-- المحرر (يأخذ 60% في الموبايل) -->
+            <div class="flex flex-col h-[55%] md:h-auto md:flex-1 border-b md:border-b-0 md:border-l border-slate-700">
+                <div class="bg-[#1e293b] px-2 py-1 flex justify-between items-center border-b border-slate-700 shrink-0">
+                    <span id="current-file-name" class="text-xs font-mono text-gray-300">main.py</span>
+                    <div class="flex gap-1">
+                        <button onclick="saveCurrentFile()" class="text-[10px] bg-slate-600 hover:bg-slate-500 px-2 py-1 rounded"><i class="fa-solid fa-save"></i> حفظ</button>
+                        <button onclick="runCode()" id="btn-run" class="text-[10px] bg-green-600 hover:bg-green-500 px-3 py-1 rounded font-bold"><i class="fa-solid fa-play"></i> تشغيل</button>
+                        <button onclick="stopCode()" id="btn-stop" class="text-[10px] bg-red-600 hover:bg-red-500 px-3 py-1 rounded font-bold hidden"><i class="fa-solid fa-stop"></i> إيقاف</button>
                     </div>
                 </div>
-                <div id="editor-container" class="flex-1"></div>
+                <div id="editor-container" class="flex-1 w-full"></div>
             </div>
 
-            <!-- الطرفية -->
-            <div class="w-full lg:w-80 glass-panel flex flex-col shrink-0 border-t lg:border-t-0 lg:border-r border-slate-700 h-[40vh] lg:h-auto">
-                <div class="flex justify-between items-center px-2 py-1 bg-slate-800 text-xs font-bold text-gray-400 border-b border-slate-700">
-                    <span><i class="fa-solid fa-terminal"></i> Terminal</span>
+            <!-- الطرفية (تأخذ 45% في الموبايل وتظهر دائماً) -->
+            <div class="flex flex-col h-[45%] md:h-auto md:w-[45%] bg-[#0d1117]">
+                <div class="flex justify-between items-center px-2 py-1 bg-[#1e293b] text-[10px] font-mono border-b border-slate-700 text-gray-400 shrink-0">
+                    <span>Terminal - Pip</span>
                     <button onclick="clearTerminal()" class="hover:text-white"><i class="fa-solid fa-trash"></i></button>
                 </div>
-                <div class="flex-1 p-1 bg-[#0d1117] overflow-hidden flex flex-col">
-                    <div id="terminal" class="term-output flex-1 mb-1"></div>
-                    <div class="flex gap-1">
-                        <input type="text" id="pip-input" placeholder="pip install..." class="flex-1 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white font-mono outline-none focus:border-blue-500" dir="ltr" onkeydown="if(event.key==='Enter') installPackage()">
-                        <button onclick="installPackage()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-xs font-bold"><i class="fa-solid fa-download"></i></button>
-                    </div>
+                
+                <!-- شاشة الطباعة -->
+                <div id="terminal" class="term-output flex-1 p-2 overflow-y-auto"></div>
+                
+                <!-- أوامر سريعة (تسهيل للمستخدم) -->
+                <div class="bg-[#161b22] px-2 py-1 border-t border-slate-700 flex gap-1 overflow-x-auto shrink-0 text-[10px]">
+                    <button onclick="quickInstall('pyTelegramBotAPI')" class="bg-indigo-600 hover:bg-indigo-500 px-2 py-1 rounded text-white whitespace-nowrap"><i class="fa-brands fa-telegram"></i> تثبيت تيليجرام</button>
+                    <button onclick="quickInstall('requests')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white whitespace-nowrap">requests</button>
+                    <button onclick="quickInstall('beautifulsoup4')" class="bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white whitespace-nowrap">bs4</button>
+                </div>
+
+                <!-- إدخال Pip -->
+                <div class="flex border-t border-slate-700 shrink-0">
+                    <span class="bg-[#161b22] text-green-400 px-2 py-2 text-xs font-mono border-l border-slate-700">$</span>
+                    <input type="text" id="pip-input" placeholder="pip install ..." class="flex-1 bg-[#0d1117] text-white px-2 py-2 text-xs font-mono outline-none" dir="ltr" onkeydown="if(event.key==='Enter') installPackage()">
+                    <button onclick="installPackage()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 text-xs font-bold"><i class="fa-solid fa-arrow-turn-left"></i></button>
                 </div>
             </div>
+
         </main>
     </div>
+
+    <!-- طبقة تعتيم للموبايل -->
+    <div id="overlay" class="fixed inset-0 bg-black/60 z-20 hidden md:hidden" onclick="toggleFiles()"></div>
 
     <script src="app.js"></script>
 </body>

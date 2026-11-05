@@ -95,39 +95,66 @@ function initPyodideWorker() {
     const workerCode = `
         importScripts("https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js");
         let pyodide; let isRunning = false;
+        
         async function init() {
             try {
                 pyodide = await loadPyodide({
                     stdout: (text) => postMessage({ type: 'stdout', data: text }),
                     stderr: (text) => postMessage({ type: 'stderr', data: text })
                 });
+                
+                // 1. تحميل micropip
                 await pyodide.loadPackage("micropip");
+                
+                // 2. تحميل وحدة ssl (مهمة جداً لمكتبة تيليجرام)
+                await pyodide.loadPackage("ssl");
+                
+                // 3. تحميل pyodide-http عشان requests يشتغل
                 const micropip = pyodide.pyimport("micropip");
                 await micropip.install("pyodide-http");
-                pyodide.runPython(\`import pyodide_http; pyodide_http.patch_all()\`);
+                
+                // 4. تفعيل الـ patch للـ requests
+                pyodide.runPython(\`
+import pyodide_http
+pyodide_http.patch_all()
+                \`);
+                
                 postMessage({ type: 'ready' });
-            } catch (e) { postMessage({ type: 'error', data: e.message }); }
+            } catch (e) { 
+                postMessage({ type: 'error', data: e.message }); 
+            }
         }
+        
         self.onmessage = async (e) => {
             const { action, code, pkg } = e.data;
             if (action === 'run') {
                 if (isRunning) return;
                 isRunning = true;
-                try { await pyodide.runPythonAsync(code); } 
-                catch (err) { postMessage({ type: 'stderr', data: err.message }); } 
-                finally { isRunning = false; postMessage({ type: 'done' }); }
-            } else if (action === 'stop') { isRunning = false; self.close(); } 
-            else if (action === 'install') {
+                try { 
+                    await pyodide.runPythonAsync(code); 
+                } catch (err) { 
+                    postMessage({ type: 'stderr', data: err.message }); 
+                } finally { 
+                    isRunning = false; 
+                    postMessage({ type: 'done' }); 
+                }
+            } else if (action === 'stop') { 
+                isRunning = false; 
+                self.close(); 
+            } else if (action === 'install') {
                 try {
                     const micropip = pyodide.pyimport("micropip");
                     await micropip.install(pkg);
                     postMessage({ type: 'stdout', data: "Successfully installed " + pkg });
-                } catch (err) { postMessage({ type: 'stderr', data: "Failed: " + err.message }); }
+                } catch (err) { 
+                    postMessage({ type: 'stderr', data: "Failed: " + err.message }); 
+                }
                 postMessage({ type: 'done' });
             }
         };
         init();
     `;
+    
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     pyWorker = new Worker(URL.createObjectURL(blob));
 
@@ -138,7 +165,7 @@ function initPyodideWorker() {
             document.getElementById('loader').style.display = 'none';
             document.getElementById('py-status').className = 'flex items-center gap-1 text-[10px] text-green-400 bg-slate-800 px-2 py-1 rounded';
             document.getElementById('py-status').innerHTML = '<i class="fa-solid fa-circle text-[6px]"></i> جاهز';
-            logToTerminal('> Python Ready. Terminal active.', '#38bdf8');
+            logToTerminal('> Python Ready + SSL. Terminal active.', '#38bdf8');
         } else if (type === 'stdout' || type === 'stderr') {
             logToTerminal(data, type === 'stderr' ? '#ef4444' : '#4ade80');
         } else if (type === 'error') {
@@ -157,7 +184,10 @@ async function loadFilesList() {
     const files = await getAllFilesFromDB();
     const list = document.getElementById('file-list');
     list.innerHTML = '';
-    if (files.length === 0) { await saveFileToDB('main.py', editor.getValue()); files.push({ name: 'main.py' }); }
+    if (files.length === 0) { 
+        await saveFileToDB('main.py', editor ? editor.getValue() : ''); 
+        files.push({ name: 'main.py' }); 
+    }
     files.forEach(f => {
         const li = document.createElement('li');
         const isActive = f.name === currentFileName;
@@ -195,7 +225,11 @@ async function createNewFile() {
 async function deleteFile(name) {
     if (!confirm('حذف؟')) return;
     await deleteFileFromDB(name);
-    if (name === currentFileName) { currentFileName = 'main.py'; editor.setValue(''); }
+    if (name === currentFileName) { 
+        currentFileName = 'main.py'; 
+        const def = await getFileFromDB('main.py');
+        editor.setValue(def || ''); 
+    }
     loadFilesList();
 }
 
@@ -250,6 +284,10 @@ function clearTerminal() { terminal.innerHTML = ''; }
 async function boot() {
     await initDB();
     initPyodideWorker();
-    setInterval(async () => { if (editor && document.getElementById('file-list').innerHTML === '') await loadFilesList(); }, 500);
+    setInterval(async () => { 
+        if (editor && document.getElementById('file-list').innerHTML === '') {
+            await loadFilesList(); 
+        }
+    }, 500);
 }
 boot();

@@ -1,112 +1,82 @@
 // ==========================================
 // 1. إدارة الملفات (IndexedDB)
 // ==========================================
-const DB_NAME = 'ASTAF_V3';
+const DB_NAME = 'ASTAF_V4';
 const STORE_NAME = 'files';
-let db;
-let currentFileName = 'main.py';
-let editor;
-let pyWorker;
-let isWorkerReady = false;
+let db, currentFileName = 'main.py', editor, pyWorker, isWorkerReady = false, wakeLock = null;
 const terminal = document.getElementById('terminal');
 
-// إدارة القائمة الجانبية للموبايل
-function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const overlay = document.getElementById('overlay');
-    sidebar.classList.toggle('-translate-x-full');
-    overlay.classList.toggle('hidden');
+function toggleFiles() {
+    document.getElementById('files-panel').classList.toggle('translate-x-full');
+    document.getElementById('overlay').classList.toggle('hidden');
 }
 
 function initDB() {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = e => {
-            if (!e.target.result.objectStoreNames.contains(STORE_NAME)) {
-                e.target.result.createObjectStore(STORE_NAME, { keyPath: 'name' });
-            }
-        };
+        req.onupgradeneeded = e => { if (!e.target.result.objectStoreNames.contains(STORE_NAME)) e.target.result.createObjectStore(STORE_NAME, { keyPath: 'name' }); };
         req.onsuccess = e => { db = e.target.result; resolve(); };
         req.onerror = e => reject(e);
     });
 }
 
 function saveFileToDB(name, content) {
-    return new Promise((resolve, reject) => {
+    return new Promise(resolve => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         tx.objectStore(STORE_NAME).put({ name, content });
         tx.oncomplete = () => resolve();
-        tx.onerror = e => reject(e);
     });
 }
 
 function getFileFromDB(name) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).get(name);
+    return new Promise(resolve => {
+        const req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(name);
         req.onsuccess = () => resolve(req.result ? req.result.content : null);
-        req.onerror = e => reject(e);
     });
 }
 
 function getAllFilesFromDB() {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).getAll();
+    return new Promise(resolve => {
+        const req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll();
         req.onsuccess = () => resolve(req.result);
-        req.onerror = e => reject(e);
     });
 }
 
 function deleteFileFromDB(name) {
-    return new Promise((resolve, reject) => {
+    return new Promise(resolve => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         tx.objectStore(STORE_NAME).delete(name);
         tx.oncomplete = () => resolve();
-        tx.onerror = e => reject(e);
     });
 }
 
 // ==========================================
-// 2. Wake Lock API (منع الشاشة من النوم)
+// 2. Wake Lock (منع النوم)
 // ==========================================
-let wakeLock = null;
-
 async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
-            document.getElementById('wake-status').classList.remove('hidden');
-            document.getElementById('wake-status').classList.add('flex');
-            logToTerminal('تم تفعيل وضع "الشاشة النشطة". البوت لن يتوقف طالما الشاشة مفتوحة.', '#38bdf8');
+            logToTerminal('> Screen Wake Lock Active. Bot will stay alive.', '#38bdf8');
         }
-    } catch (err) {
-        logToTerminal('فشل تفعيل Wake Lock: ' + err.message, '#ef4444');
-    }
+    } catch (e) { logToTerminal('> Wake Lock Failed: ' + e.message, '#ef4444'); }
 }
 
-function releaseWakeLock() {
-    if (wakeLock !== null) {
-        wakeLock.release().then(() => {
-            wakeLock = null;
-            document.getElementById('wake-status').classList.add('hidden');
-            document.getElementById('wake-status').classList.remove('flex');
-        });
-    }
-}
+function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
 
 // ==========================================
-// 3. إعداد Monaco Editor
+// 3. Monaco Editor
 // ==========================================
 require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
 require(['vs/editor/editor.main'], function() {
     editor = monaco.editor.create(document.getElementById('editor-container'), {
-        value: "# اكتب الكود هنا\nprint('Hello ASTAF')\n",
+        value: `import telebot\nimport time\n\n# ضع التوكن هنا\nbot = telebot.TeleBot("YOUR_TOKEN_HERE")\n\n@bot.message_handler(commands=['start'])\ndef send_welcome(message):\n    bot.reply_to(message, "أهلاً بك يا هلا محمد! البوت يعمل.")\n\nprint("البوت بدأ العمل...")\nwhile True:\n    try:\n        bot.polling(none_stop=True, timeout=10)\n    except Exception as e:\n        print("Error:", e)\n        time.sleep(3)\n`,
         language: 'python',
         theme: 'vs-dark',
         automaticLayout: true,
-        fontSize: 14,
-        minimap: { enabled: false }
+        fontSize: 13,
+        minimap: { enabled: false },
+        lineNumbersMinChars: 2
     });
 });
 
@@ -151,8 +121,8 @@ function initPyodideWorker() {
                 try {
                     const micropip = pyodide.pyimport("micropip");
                     await micropip.install(pkg);
-                    postMessage({ type: 'stdout', data: "تم تثبيت " + pkg });
-                } catch (err) { postMessage({ type: 'stderr', data: "فشل تثبيت " + pkg + ": " + err.message }); }
+                    postMessage({ type: 'stdout', data: "Successfully installed " + pkg });
+                } catch (err) { postMessage({ type: 'stderr', data: "Failed: " + err.message }); }
                 postMessage({ type: 'done' });
             }
         };
@@ -166,13 +136,13 @@ function initPyodideWorker() {
         if (type === 'ready') {
             isWorkerReady = true;
             document.getElementById('loader').style.display = 'none';
-            document.getElementById('py-status').className = 'flex items-center gap-1 text-green-400 bg-slate-800 px-2 py-1 rounded';
-            document.getElementById('py-status').innerHTML = '<i class="fa-solid fa-circle text-[8px]"></i> جاهز';
-            logToTerminal('Python Ready!', '#38bdf8');
+            document.getElementById('py-status').className = 'flex items-center gap-1 text-[10px] text-green-400 bg-slate-800 px-2 py-1 rounded';
+            document.getElementById('py-status').innerHTML = '<i class="fa-solid fa-circle text-[6px]"></i> جاهز';
+            logToTerminal('> Python Ready. Terminal active.', '#38bdf8');
         } else if (type === 'stdout' || type === 'stderr') {
             logToTerminal(data, type === 'stderr' ? '#ef4444' : '#4ade80');
         } else if (type === 'error') {
-            document.getElementById('loader').innerHTML = '<p class="text-red-500">فشل التحميل: ' + data + '</p>';
+            document.getElementById('loader').innerHTML = '<p class="text-red-500 text-xs">Error: ' + data + '</p>';
         } else if (type === 'done') {
             document.getElementById('btn-run').classList.remove('hidden');
             document.getElementById('btn-stop').classList.add('hidden');
@@ -181,27 +151,18 @@ function initPyodideWorker() {
 }
 
 // ==========================================
-// 5. الأزرار والواجهة
+// 5. الوظائف (ملفات، تشغيل، تثبيت)
 // ==========================================
 async function loadFilesList() {
     const files = await getAllFilesFromDB();
     const list = document.getElementById('file-list');
     list.innerHTML = '';
-    if (files.length === 0) {
-        await saveFileToDB('main.py', editor ? editor.getValue() : '');
-        files.push({ name: 'main.py' });
-    }
-    files.sort((a,b) => a.name.localeCompare(b.name));
+    if (files.length === 0) { await saveFileToDB('main.py', editor.getValue()); files.push({ name: 'main.py' }); }
     files.forEach(f => {
         const li = document.createElement('li');
         const isActive = f.name === currentFileName;
-        li.className = `p-2 rounded cursor-pointer flex justify-between items-center ${isActive ? 'bg-blue-900/50 text-blue-200 border border-blue-700' : 'hover:bg-slate-700'}`;
-        li.innerHTML = `
-            <span onclick="openFile('${f.name}')" class="flex-1 flex items-center gap-2 truncate">
-                <i class="fa-brands fa-python text-yellow-500"></i> ${f.name}
-            </span>
-            <button onclick="deleteFile('${f.name}')" class="text-red-400 hover:text-red-300 px-2"><i class="fa-solid fa-trash text-xs"></i></button>
-        `;
+        li.className = `p-2 rounded flex justify-between items-center cursor-pointer ${isActive ? 'bg-blue-900/50 text-blue-200 border border-blue-700' : 'hover:bg-slate-700'}`;
+        li.innerHTML = `<span onclick="openFile('${f.name}')" class="flex-1 truncate"><i class="fa-brands fa-python text-yellow-500 ml-1"></i> ${f.name}</span><button onclick="deleteFile('${f.name}')" class="text-red-400 px-1"><i class="fa-solid fa-trash text-[10px]"></i></button>`;
         list.appendChild(li);
     });
 }
@@ -214,83 +175,71 @@ async function openFile(name) {
         document.getElementById('current-file-name').innerText = name;
         editor.setValue(content);
         loadFilesList();
-        if (window.innerWidth < 768) toggleSidebar(); // إغلاق القائمة في الموبايل
+        if (window.innerWidth < 768) toggleFiles();
     }
 }
 
 async function saveCurrentFile() {
-    if (!currentFileName) return;
     await saveFileToDB(currentFileName, editor.getValue());
-    logToTerminal(`تم حفظ ${currentFileName}`, '#38bdf8');
-    loadFilesList();
+    logToTerminal(`> Saved ${currentFileName}`, '#38bdf8');
 }
 
 async function createNewFile() {
-    const name = prompt('اسم الملف الجديد (مثال: bot.py):');
+    const name = prompt('اسم الملف:');
     if (!name) return;
     let fileName = name.endsWith('.py') ? name : name + '.py';
-    if (await getFileFromDB(fileName) !== null) return alert('الملف موجود مسبقاً');
     await saveFileToDB(fileName, '');
     openFile(fileName);
 }
 
 async function deleteFile(name) {
-    if (!confirm(`حذف الملف ${name}؟`)) return;
+    if (!confirm('حذف؟')) return;
     await deleteFileFromDB(name);
-    if (name === currentFileName) {
-        currentFileName = 'main.py';
-        document.getElementById('current-file-name').innerText = 'main.py';
-        const def = await getFileFromDB('main.py');
-        editor.setValue(def || '');
-    }
+    if (name === currentFileName) { currentFileName = 'main.py'; editor.setValue(''); }
     loadFilesList();
 }
 
 async function uploadFile(input) {
     const file = input.files[0];
     if (!file) return;
-    const text = await file.text();
-    await saveFileToDB(file.name, text);
+    await saveFileToDB(file.name, await file.text());
     openFile(file.name);
     input.value = '';
 }
 
 function runCode() {
-    if (!isWorkerReady) return alert('بايثون لم يكتمل تحميله بعد.');
-    const code = editor.getValue();
-    logToTerminal('\n--- بدء التشغيل ---', '#38bdf8');
+    if (!isWorkerReady) return alert('Python غير جاهز!');
+    logToTerminal('\n--- RUNNING ---', '#38bdf8');
     document.getElementById('btn-run').classList.add('hidden');
     document.getElementById('btn-stop').classList.remove('hidden');
-    
-    // تفعيل منع النوم
-    requestWakeLock(); 
-    
-    pyWorker.postMessage({ action: 'run', code });
+    requestWakeLock();
+    pyWorker.postMessage({ action: 'run', code: editor.getValue() });
 }
 
 function stopCode() {
-    if (!isWorkerReady) return;
-    logToTerminal('\n--- إيقاف قسري ---', '#ef4444');
-    
-    // إلغاء منع النوم
-    releaseWakeLock(); 
-    
-    pyWorker.terminate(); 
+    releaseWakeLock();
+    pyWorker.terminate();
     document.getElementById('btn-run').classList.remove('hidden');
     document.getElementById('btn-stop').classList.add('hidden');
     isWorkerReady = false;
-    initPyodideWorker(); 
+    logToTerminal('\n--- STOPPED ---', '#ef4444');
+    initPyodideWorker();
 }
 
 async function installPackage() {
-    if (!isWorkerReady) return alert('بايثون لم يكتمل تحميله بعد.');
+    if (!isWorkerReady) return alert('Python غير جاهز!');
     const input = document.getElementById('pip-input');
     let pkg = input.value.trim();
     if (!pkg) return;
     if (pkg.startsWith('pip install ')) pkg = pkg.replace('pip install ', '').trim();
-    logToTerminal(`\n> pip install ${pkg}`, '#38bdf8');
+    logToTerminal(`\n$ pip install ${pkg}`, '#38bdf8');
     input.value = '';
     pyWorker.postMessage({ action: 'install', pkg });
+}
+
+function quickInstall(pkg) {
+    document.getElementById('pip-input').value = pkg;
+    installPackage();
 }
 
 function clearTerminal() { terminal.innerHTML = ''; }
@@ -301,8 +250,6 @@ function clearTerminal() { terminal.innerHTML = ''; }
 async function boot() {
     await initDB();
     initPyodideWorker();
-    const checkEditor = setInterval(async () => {
-        if (editor) { clearInterval(checkEditor); await loadFilesList(); }
-    }, 100);
+    setInterval(async () => { if (editor && document.getElementById('file-list').innerHTML === '') await loadFilesList(); }, 500);
 }
 boot();

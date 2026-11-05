@@ -1,17 +1,29 @@
 // ==========================================
-// 1. إدارة الملفات والتخزين (IndexedDB)
+// 1. إدارة الملفات (IndexedDB)
 // ==========================================
-const DB_NAME = 'ASTAF_DB_V2';
+const DB_NAME = 'ASTAF_V3';
 const STORE_NAME = 'files';
 let db;
+let currentFileName = 'main.py';
+let editor;
+let pyWorker;
+let isWorkerReady = false;
+const terminal = document.getElementById('terminal');
+
+// إدارة القائمة الجانبية للموبايل
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
+    sidebar.classList.toggle('-translate-x-full');
+    overlay.classList.toggle('hidden');
+}
 
 function initDB() {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, 1);
         req.onupgradeneeded = e => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME, { keyPath: 'name' });
+            if (!e.target.result.objectStoreNames.contains(STORE_NAME)) {
+                e.target.result.createObjectStore(STORE_NAME, { keyPath: 'name' });
             }
         };
         req.onsuccess = e => { db = e.target.result; resolve(); };
@@ -56,31 +68,51 @@ function deleteFileFromDB(name) {
 }
 
 // ==========================================
-// 2. إعداد Monaco Editor
+// 2. Wake Lock API (منع الشاشة من النوم)
 // ==========================================
-let editor;
-let currentFileName = 'main.py';
+let wakeLock = null;
 
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            document.getElementById('wake-status').classList.remove('hidden');
+            document.getElementById('wake-status').classList.add('flex');
+            logToTerminal('تم تفعيل وضع "الشاشة النشطة". البوت لن يتوقف طالما الشاشة مفتوحة.', '#38bdf8');
+        }
+    } catch (err) {
+        logToTerminal('فشل تفعيل Wake Lock: ' + err.message, '#ef4444');
+    }
+}
+
+function releaseWakeLock() {
+    if (wakeLock !== null) {
+        wakeLock.release().then(() => {
+            wakeLock = null;
+            document.getElementById('wake-status').classList.add('hidden');
+            document.getElementById('wake-status').classList.remove('flex');
+        });
+    }
+}
+
+// ==========================================
+// 3. إعداد Monaco Editor
+// ==========================================
 require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
 require(['vs/editor/editor.main'], function() {
     editor = monaco.editor.create(document.getElementById('editor-container'), {
-        value: "# مرحباً بك في ASTAF V2\n# اكتب كود بايثون هنا، ثم اضغط تشغيل.\n\nprint('Hello, ASTAF!')\n",
+        value: "# اكتب الكود هنا\nprint('Hello ASTAF')\n",
         language: 'python',
         theme: 'vs-dark',
         automaticLayout: true,
         fontSize: 14,
-        minimap: { enabled: false },
-        lineNumbers: 'on'
+        minimap: { enabled: false }
     });
 });
 
 // ==========================================
-// 3. إعداد Pyodide Web Worker
+// 4. Pyodide Web Worker
 // ==========================================
-let pyWorker;
-const terminal = document.getElementById('terminal');
-let isWorkerReady = false;
-
 function logToTerminal(msg, color = '#4ade80') {
     const line = document.createElement('div');
     line.style.color = color;
@@ -90,67 +122,42 @@ function logToTerminal(msg, color = '#4ade80') {
 }
 
 function initPyodideWorker() {
-    // كود الـ Worker (يعمل في الخلفية لمنع تجميد الواجهة)
     const workerCode = `
         importScripts("https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js");
-        
-        let pyodide;
-        let isRunning = false;
-
+        let pyodide; let isRunning = false;
         async function init() {
             try {
                 pyodide = await loadPyodide({
                     stdout: (text) => postMessage({ type: 'stdout', data: text }),
                     stderr: (text) => postMessage({ type: 'stderr', data: text })
                 });
-                
-                // تحميل pyodide-http لكي تعمل طلبات requests و telebot
                 await pyodide.loadPackage("micropip");
                 const micropip = pyodide.pyimport("micropip");
                 await micropip.install("pyodide-http");
-                pyodide.runPython(\`
-                    import pyodide_http
-                    pyodide_http.patch_all()
-                \`);
-                
+                pyodide.runPython(\`import pyodide_http; pyodide_http.patch_all()\`);
                 postMessage({ type: 'ready' });
-            } catch (e) {
-                postMessage({ type: 'error', data: e.message });
-            }
+            } catch (e) { postMessage({ type: 'error', data: e.message }); }
         }
-
         self.onmessage = async (e) => {
             const { action, code, pkg } = e.data;
-            
             if (action === 'run') {
                 if (isRunning) return;
                 isRunning = true;
-                try {
-                    await pyodide.runPythonAsync(code);
-                } catch (err) {
-                    postMessage({ type: 'stderr', data: err.message });
-                } finally {
-                    isRunning = false;
-                    postMessage({ type: 'done' });
-                }
-            } else if (action === 'stop') {
-                isRunning = false;
-                self.close(); // إيقاف قسري
-            } else if (action === 'install') {
+                try { await pyodide.runPythonAsync(code); } 
+                catch (err) { postMessage({ type: 'stderr', data: err.message }); } 
+                finally { isRunning = false; postMessage({ type: 'done' }); }
+            } else if (action === 'stop') { isRunning = false; self.close(); } 
+            else if (action === 'install') {
                 try {
                     const micropip = pyodide.pyimport("micropip");
                     await micropip.install(pkg);
-                    postMessage({ type: 'stdout', data: "Successfully installed " + pkg });
-                } catch (err) {
-                    postMessage({ type: 'stderr', data: "Failed to install " + pkg + ": " + err.message });
-                }
+                    postMessage({ type: 'stdout', data: "تم تثبيت " + pkg });
+                } catch (err) { postMessage({ type: 'stderr', data: "فشل تثبيت " + pkg + ": " + err.message }); }
                 postMessage({ type: 'done' });
             }
         };
-
         init();
     `;
-
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     pyWorker = new Worker(URL.createObjectURL(blob));
 
@@ -159,14 +166,13 @@ function initPyodideWorker() {
         if (type === 'ready') {
             isWorkerReady = true;
             document.getElementById('loader').style.display = 'none';
-            document.getElementById('py-status').className = 'flex items-center gap-2 text-green-400';
-            document.getElementById('py-status').innerHTML = '<i class="fa-solid fa-circle text-xs"></i> Python جاهز';
-            logToTerminal('Python Ready (WebAssembly)', '#38bdf8');
+            document.getElementById('py-status').className = 'flex items-center gap-1 text-green-400 bg-slate-800 px-2 py-1 rounded';
+            document.getElementById('py-status').innerHTML = '<i class="fa-solid fa-circle text-[8px]"></i> جاهز';
+            logToTerminal('Python Ready!', '#38bdf8');
         } else if (type === 'stdout' || type === 'stderr') {
             logToTerminal(data, type === 'stderr' ? '#ef4444' : '#4ade80');
         } else if (type === 'error') {
-            document.getElementById('loader-msg').innerText = 'فشل التحميل: ' + data;
-            document.getElementById('loader-msg').style.color = 'red';
+            document.getElementById('loader').innerHTML = '<p class="text-red-500">فشل التحميل: ' + data + '</p>';
         } else if (type === 'done') {
             document.getElementById('btn-run').classList.remove('hidden');
             document.getElementById('btn-stop').classList.add('hidden');
@@ -175,18 +181,16 @@ function initPyodideWorker() {
 }
 
 // ==========================================
-// 4. التحكم بالواجهة (تشغيل، إيقاف، رفع)
+// 5. الأزرار والواجهة
 // ==========================================
 async function loadFilesList() {
     const files = await getAllFilesFromDB();
     const list = document.getElementById('file-list');
     list.innerHTML = '';
-    
     if (files.length === 0) {
-        await saveFileToDB('main.py', editor ? editor.getValue() : "# مرحباً بك\nprint('Hello')\n");
+        await saveFileToDB('main.py', editor ? editor.getValue() : '');
         files.push({ name: 'main.py' });
     }
-
     files.sort((a,b) => a.name.localeCompare(b.name));
     files.forEach(f => {
         const li = document.createElement('li');
@@ -210,6 +214,7 @@ async function openFile(name) {
         document.getElementById('current-file-name').innerText = name;
         editor.setValue(content);
         loadFilesList();
+        if (window.innerWidth < 768) toggleSidebar(); // إغلاق القائمة في الموبايل
     }
 }
 
@@ -224,10 +229,7 @@ async function createNewFile() {
     const name = prompt('اسم الملف الجديد (مثال: bot.py):');
     if (!name) return;
     let fileName = name.endsWith('.py') ? name : name + '.py';
-    
-    const exists = await getFileFromDB(fileName);
-    if (exists !== null) return alert('الملف موجود مسبقاً');
-    
+    if (await getFileFromDB(fileName) !== null) return alert('الملف موجود مسبقاً');
     await saveFileToDB(fileName, '');
     openFile(fileName);
 }
@@ -259,17 +261,25 @@ function runCode() {
     logToTerminal('\n--- بدء التشغيل ---', '#38bdf8');
     document.getElementById('btn-run').classList.add('hidden');
     document.getElementById('btn-stop').classList.remove('hidden');
+    
+    // تفعيل منع النوم
+    requestWakeLock(); 
+    
     pyWorker.postMessage({ action: 'run', code });
 }
 
 function stopCode() {
     if (!isWorkerReady) return;
-    logToTerminal('\n--- إيقاف قسري للبوت ---', '#ef4444');
+    logToTerminal('\n--- إيقاف قسري ---', '#ef4444');
+    
+    // إلغاء منع النوم
+    releaseWakeLock(); 
+    
     pyWorker.terminate(); 
     document.getElementById('btn-run').classList.remove('hidden');
     document.getElementById('btn-stop').classList.add('hidden');
     isWorkerReady = false;
-    initPyodideWorker(); // إعادة تشغيل الخيط
+    initPyodideWorker(); 
 }
 
 async function installPackage() {
@@ -277,9 +287,7 @@ async function installPackage() {
     const input = document.getElementById('pip-input');
     let pkg = input.value.trim();
     if (!pkg) return;
-    
     if (pkg.startsWith('pip install ')) pkg = pkg.replace('pip install ', '').trim();
-    
     logToTerminal(`\n> pip install ${pkg}`, '#38bdf8');
     input.value = '';
     pyWorker.postMessage({ action: 'install', pkg });
@@ -288,18 +296,13 @@ async function installPackage() {
 function clearTerminal() { terminal.innerHTML = ''; }
 
 // ==========================================
-// 5. التشغيل الأولي
+// 6. التشغيل
 // ==========================================
 async function boot() {
     await initDB();
     initPyodideWorker();
-    
     const checkEditor = setInterval(async () => {
-        if (editor) {
-            clearInterval(checkEditor);
-            await loadFilesList();
-        }
+        if (editor) { clearInterval(checkEditor); await loadFilesList(); }
     }, 100);
 }
-
 boot();
